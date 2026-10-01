@@ -10,14 +10,38 @@ Validates that [Privy](https://privy.io) can handle, in one SDK:
 
 ## Run it
 
-1. In the [Privy dashboard](https://dashboard.privy.io), create an app:
-   - Enable **Email** and **Wallet** login methods.
-   - Enable **EVM embedded wallets**.
-   - Add `http://localhost:5173` to allowed origins.
-2. `cp .env.example .env` and set `VITE_PRIVY_APP_ID`. `VITE_NETWORK` defaults to `arbitrum-sepolia`; set it to `arbitrum` for mainnet (real USDC).
-3. `npm install && npm run dev`
+**1. Create a `.env` file in the project root** with these contents:
 
-The external wallet needs a little ETH on the chosen network for gas.
+```bash
+VITE_PRIVY_APP_ID=your-privy-app-id
+VITE_NETWORK=arbitrum-sepolia
+```
+
+| Variable | Value |
+|---|---|
+| `VITE_PRIVY_APP_ID` | Privy App ID (required) |
+| `VITE_NETWORK` | `arbitrum-sepolia` (testnet, Circle test USDC) or `arbitrum` (mainnet, **real USDC**) |
+
+`.env` is gitignored. Don't commit it.
+
+**2. Install and start:**
+
+```bash
+npm install
+npm run dev
+```
+
+Open http://localhost:5173.
+
+The external wallet (MetaMask / Rabby) needs USDC, plus a little ETH for gas, on the network you chose.
+
+### Using your own Privy app
+
+If you set up your own app in the [Privy dashboard](https://dashboard.privy.io), configure it like this:
+
+- Enable **Email** and **Wallet** login methods.
+- Enable **EVM embedded wallets**.
+- Add `http://localhost:5173` to allowed origins.
 
 ## Where the code is
 
