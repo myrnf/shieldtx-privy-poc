@@ -8,7 +8,7 @@ export function App() {
   const { ready, authenticated, user, login, logout } = usePrivy()
   useEnsureEmbeddedWallet()
   const depositWallet = useDepositWallet()
-  const { embedded, linkedExternal, active } = depositWallet
+  const { embedded } = depositWallet
   const [depositOpen, setDepositOpen] = useState(false)
 
   if (!ready) return <main><p>Loading…</p></main>
@@ -41,17 +41,6 @@ export function App() {
         <dd>{user.email?.address ?? '—'}</dd>
         <dt>Embedded wallet</dt>
         <dd>{embedded ? <code>{embedded.address}</code> : 'not created'}</dd>
-        <dt>Linked external wallets</dt>
-        <dd>
-          {linkedExternal.length === 0
-            ? 'none'
-            : linkedExternal.map((a) => (
-                <div key={a.address}>
-                  <code>{a.address}</code> ({a.walletClientType}
-                  {active?.address.toLowerCase() === a.address.toLowerCase() ? ', active' : ''})
-                </div>
-              ))}
-        </dd>
       </dl>
 
       <button onClick={onDeposit}>Deposit</button>

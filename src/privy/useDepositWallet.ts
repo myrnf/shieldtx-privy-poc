@@ -1,53 +1,79 @@
-import { usePrivy, useWallets, useLinkAccount, type ConnectedWallet, type WalletWithMetadata } from '@privy-io/react-auth'
+import { useState } from 'react'
+import { usePrivy, useWallets, useConnectWallet, type ConnectedWallet, type WalletWithMetadata } from '@privy-io/react-auth'
 
 /**
- * Where the user is in the "deposit from my existing wallet" flow.
- *
- * - `no-wallet`     never linked an external wallet → linkWallet() (Privy modal: pick wallet + SIWE signature)
- * - `needs-connect` has linked wallet(s), but none connected this session (new device, revoked permission…)
- * - `needs-link`    a wallet is connected, but the selected account isn't linked (e.g. user switched account in Rabby)
- * - `ready`         selected account is connected AND linked → can send
+ * - `no-wallet` no remembered wallet, or it's no longer connected → promptForWallet()
+ * - `ready`     the remembered wallet is connected → can send
  */
-export type DepositWalletStatus = 'no-wallet' | 'needs-connect' | 'needs-link' | 'ready'
+export type DepositWalletStatus = 'no-wallet' | 'ready'
+
+const storageKey = (userId: string) => `poc.depositWallet.${userId}`
+
+function load(key: string | null) {
+  if (!key) return null
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function save(key: string, walletClientType: string) {
+  try {
+    localStorage.setItem(key, walletClientType)
+  } catch {}
+}
 
 /**
- * Key distinction: "linked" is stored on the Privy user server-side and persists forever;
- * "connected" is a per-session browser connection and is what's needed to sign.
+ * Deposits only need the external wallet *connected* (a per-session browser connection that can
+ * sign), not *linked* to the Privy user. Linking would make the wallet a login method, and Privy
+ * allows each address on only one user, so a wallet linked by another account could never deposit.
+ * Consequence: Privy keeps no record of which wallets a user deposits from.
+ *
+ * The user picks the wallet once in Privy's picker; we remember that choice (per Privy user, across
+ * reloads) and reuse it while it stays connected. We never auto-use an unpicked wallet: Privy
+ * restores every wallet that previously approved the site (e.g. Phantom's EVM provider).
  */
 export function useDepositWallet() {
-  const { user, connectWallet } = usePrivy()
-  const { wallets } = useWallets()
-  const { linkWallet } = useLinkAccount({
-    onError: (err) => console.warn('[poc] linkWallet failed:', err),
+  const { user } = usePrivy()
+  const { wallets, ready: walletsReady } = useWallets()
+  const key = user ? storageKey(user.id) : null
+
+  // Wallet app the user picked (e.g. Rabby), per Privy user. Keyed by app, not address, so switching
+  // accounts inside the wallet keeps it selected and the active address follows the switch.
+  // In-memory copy covers browsers where localStorage is unavailable.
+  const [memory, setMemory] = useState<Record<string, string>>({})
+  const picked = key ? (memory[key] ?? load(key)) : null
+
+  const { connectWallet } = useConnectWallet({
+    // Fires even if the chosen wallet was already connected.
+    onSuccess: ({ wallet }) => {
+      if (!key) return
+      setMemory((m) => ({ ...m, [key]: wallet.walletClientType }))
+      save(key, wallet.walletClientType)
+    },
   })
 
-  const walletAccounts = (user?.linkedAccounts ?? []).filter(
-    (a): a is WalletWithMetadata => a.type === 'wallet' && a.chainType === 'ethereum',
+  const embedded = user?.linkedAccounts.find(
+    (a): a is WalletWithMetadata => a.type === 'wallet' && a.walletClientType === 'privy',
   )
-  const embedded = walletAccounts.find((a) => a.walletClientType === 'privy')
-  const linkedExternal = walletAccounts.filter((a) => a.walletClientType !== 'privy')
-  const linkedAddrs = new Set(linkedExternal.map((a) => a.address.toLowerCase()))
 
-  // The account currently selected in MetaMask/Rabby. Privy follows `accountsChanged`, so after a
-  // switch this is the new address. With several extensions connected, Privy's list order decides.
-  const active: ConnectedWallet | undefined = wallets.find((w) => w.walletClientType !== 'privy')
+  const active: ConnectedWallet | undefined = picked
+    ? wallets.find((w) => w.walletClientType === picked)
+    : undefined
 
-  const status: DepositWalletStatus =
-    active ? (linkedAddrs.has(active.address.toLowerCase()) ? 'ready' : 'needs-link')
-    : linkedExternal.length > 0 ? 'needs-connect'
-    : 'no-wallet'
+  const status: DepositWalletStatus = active ? 'ready' : 'no-wallet'
 
-  /** Open whichever Privy modal the current status needs. No-op once a wallet is connected. */
+  /** Open Privy's picker. Closing it keeps the current wallet. */
+  function chooseWallet() {
+    connectWallet({ description: 'Choose the wallet you want to deposit from.' })
+  }
+
+  /** Open the picker only if there's no usable remembered wallet. */
   function promptForWallet() {
-    if (status === 'no-wallet') linkWallet()
-    else if (status === 'needs-connect') connectWallet({ description: 'Reconnect your wallet.' })
+    // Before useWallets is ready, the remembered wallet may just not be restored yet.
+    if (walletsReady && status === 'no-wallet') chooseWallet()
   }
 
-  /** Link the already-connected, selected account directly: one SIWE signature, no wallet picker. */
-  async function linkActive() {
-    if (!active) throw new Error('No connected wallet')
-    await active.loginOrLink() // Privy user updates on success → status becomes 'ready'
-  }
-
-  return { status, embedded, linkedExternal, active, promptForWallet, linkActive }
+  return { status, embedded, active, chooseWallet, promptForWallet }
 }

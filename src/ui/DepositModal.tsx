@@ -14,7 +14,7 @@ type TxState =
   | { kind: 'confirmed'; hash: Hash }
   | { kind: 'error'; message: string; hash?: Hash }
 
-export function DepositModal({ status, active, promptForWallet, linkActive, onClose }: Props) {
+export function DepositModal({ status, active, chooseWallet, onClose }: Props) {
   return (
     <div className="backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -24,48 +24,16 @@ export function DepositModal({ status, active, promptForWallet, linkActive, onCl
         </header>
         {status === 'ready' && active ? (
           // Keyed by address so inputs/tx state reset if the user switches accounts mid-flow.
-          <TransferForm key={active.address} wallet={active} />
-        ) : status === 'needs-link' && active ? (
-          <LinkActiveWallet key={active.address} wallet={active} onLink={linkActive} />
-        ) : status === 'needs-connect' ? (
-          <p>Your linked wallet isn't connected in this session. <button onClick={promptForWallet}>Connect wallet</button></p>
+          <TransferForm key={active.address} wallet={active} onChangeWallet={chooseWallet} />
         ) : (
-          <p>Link your existing wallet to deposit. <button onClick={promptForWallet}>Link wallet</button></p>
+          <p>Choose the wallet you want to deposit from. <button onClick={chooseWallet}>Choose wallet</button></p>
         )}
       </div>
     </div>
   )
 }
 
-function LinkActiveWallet({ wallet, onLink }: { wallet: ConnectedWallet; onLink: () => Promise<void> }) {
-  const [linking, setLinking] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function link() {
-    setLinking(true)
-    setError(null)
-    try {
-      await onLink()
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setLinking(false)
-    }
-  }
-
-  return (
-    <div className="stack">
-      <p>
-        {wallet.meta.name} is on <code>{wallet.address}</code>, which isn't linked to your account.
-        Link it to deposit from this address.
-      </p>
-      <button onClick={link} disabled={linking}>{linking ? 'Sign in your wallet…' : 'Link this wallet'}</button>
-      {error && <p className="warn">{error}</p>}
-    </div>
-  )
-}
-
-function TransferForm({ wallet }: { wallet: ConnectedWallet }) {
+function TransferForm({ wallet, onChangeWallet }: { wallet: ConnectedWallet; onChangeWallet: () => void }) {
   const from = wallet.address as Address
   const [balance, setBalance] = useState<bigint | null>(null)
   const [hasGas, setHasGas] = useState(true)
@@ -119,7 +87,8 @@ function TransferForm({ wallet }: { wallet: ConnectedWallet }) {
   return (
     <form onSubmit={(e) => { e.preventDefault(); submit() }}>
       <p className="muted">
-        From <code>{from}</code> ({wallet.meta.name})
+        From <code>{from}</code> ({wallet.meta.name}) ·{' '}
+        <button type="button" className="link" onClick={onChangeWallet}>Change wallet</button>
       </p>
       <p className="balance">
         {balance === null ? 'Loading balance…' : `${formatUnits(balance, USDC_DECIMALS)} USDC`}

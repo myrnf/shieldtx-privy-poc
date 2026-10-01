@@ -3,10 +3,12 @@
 Validates that [Privy](https://privy.io) can handle, in one SDK:
 
 1. **Identity**: email signup creating a Privy user plus an embedded wallet.
-2. **External wallet linking**: detecting and linking the user's existing EOA (MetaMask / Rabby) with a SIWE signature.
-3. **Interaction**: sending a USDC transfer on Arbitrum from that linked EOA.
+2. **External wallet connection**: detecting and connecting the user's existing EOA (MetaMask / Rabby).
+3. **Interaction**: sending a USDC transfer on Arbitrum from that EOA.
 
 **Result:** yes to all three, with the caveats under [Gotchas](#gotchas).
+
+**Design decision:** the external wallet is *connected*, not *linked* to the Privy user. See [Why connect, not link](#why-connect-not-link).
 
 ## Run it
 
@@ -50,7 +52,7 @@ If you set up your own app in the [Privy dashboard](https://dashboard.privy.io),
 | File | What it shows |
 |---|---|
 | [`src/privy/privyConfig.ts`](src/privy/privyConfig.ts) | `PrivyProvider` config: login methods, embedded wallet creation, chains, wallet list |
-| [`src/privy/useDepositWallet.ts`](src/privy/useDepositWallet.ts) | **Core logic.** Works out the embedded wallet, the linked wallets and the active wallet, and returns an explicit `status` with the actions to move between statuses |
+| [`src/privy/useDepositWallet.ts`](src/privy/useDepositWallet.ts) | **Core logic.** Works out the embedded wallet and the active external wallet, and remembers the wallet the user picked, and returns a `status` plus `promptForWallet()` / `chooseWallet()` |
 | [`src/privy/useEnsureEmbeddedWallet.ts`](src/privy/useEnsureEmbeddedWallet.ts) | Fallback that creates the embedded wallet if Privy's step during login was interrupted |
 | [`src/chain/usdc.ts`](src/chain/usdc.ts) | Balance read, plus the transfer through a Privy `ConnectedWallet` (switch chain → EIP-1193 provider → viem `writeContract`) |
 | [`src/chain/config.ts`](src/chain/config.ts) | Chain and USDC addresses (native USDC, not USDC.e) |
@@ -60,35 +62,37 @@ The `privy/` and `chain/` files carry over to a real app as they are. `ui/` is t
 
 ## Deposit flow (`useDepositWallet` status)
 
-```
-no-wallet      ── linkWallet() ──────────────► ready
-needs-connect  ── connectWallet() ───────────► ready
-needs-link     ── wallet.loginOrLink() ──────► ready
-ready          ── user switches account ─────► needs-link
-```
-
 | Status | Meaning | Action |
 |---|---|---|
-| `no-wallet` | User has never linked an external wallet | `linkWallet()`: Privy modal (pick wallet + SIWE signature) |
-| `needs-connect` | Wallet is linked, but not connected in this session | `connectWallet()` |
-| `needs-link` | A wallet is connected, but the selected account isn't linked | `wallet.loginOrLink()`: one signature for that exact address, no picker |
-| `ready` | Selected account is connected **and** linked | Send the transaction |
+| `no-wallet` | No remembered wallet, or it's no longer connected | `promptForWallet()` opens Privy's wallet picker |
+| `ready` | The remembered wallet is connected | Send the transaction from it |
+
+- **First deposit:** Privy's picker opens. The chosen wallet is remembered per Privy user, across reloads (in `localStorage`).
+- **Later deposits:** straight to the form while that wallet stays connected. If it isn't connected any more (permission revoked, new device), the picker opens again.
+- **Change wallet:** a link next to the From address calls `chooseWallet()` to open the picker. Closing the picker keeps the current wallet.
+- **Change account:** done inside the wallet. The picker chooses the wallet **app** (Rabby, MetaMask…); the **account** is whatever is selected in it. The active address follows the switch, and the form resets for the new one.
+- **No Disconnect button:** browser wallets mostly can't be disconnected by a site. It would only make the app forget the choice, which **Change wallet** already covers.
+
+## Why connect, not link
+
+Privy treats a **linked** wallet as a login method, so **each address can belong to only one Privy user**. If someone linked their wallet under one email and then signs up with another, linking fails with "User already exists for this address". We found no setting to turn this off, and a link can't be removed client-side.
+
+A deposit only needs the wallet **connected**: a browser connection for this session that can sign. Connecting doesn't touch Privy's user records, so any wallet works for any user.
+
+**Trade-off:** Privy keeps no record of which wallets a user deposits from. That's fine if you credit deposits by **destination** (the user's embedded wallet, or a per-user deposit address or contract). If you need to credit by **source** address, store your own proof of ownership: have the wallet sign a message and verify it on your backend. Your own table can let one address belong to several app users.
 
 ## Gotchas
 
 - **Embedded wallet creation can be interrupted.** `createOnLogin` only runs as the last step of the login modal, and Privy never retries it. If that step is interrupted (closed tab, network drop, or logging in as a second email while another window in the same browser profile is logged in as someone else), the user ends up logged in with no embedded wallet. `useEnsureEmbeddedWallet` creates the wallet when the user next loads the app.
-- **Linked ≠ connected.** *Linked* is saved on the Privy user on Privy's servers and is permanent until unlinked. *Connected* is a browser connection for this session, and it's what you need to sign. New device, cleared storage or revoked site permission means the user has to reconnect, not re-link.
-- **Account switching.** Privy follows the wallet's `accountsChanged` event. After a switch, the new address shows up in `useWallets()` with `linked: false`, and the old one drops out. Don't filter `useWallets()` down to linked addresses only: if you do, the switched account looks like "nothing connected", and `connectWallet()` becomes a silent no-op because the extension is already connected.
+- **Don't auto-use "the connected wallet".** Privy restores every wallet that has approved the site before, including ones the user didn't mean to use (Phantom injects an Ethereum wallet too). Use the wallet returned by `useConnectWallet`'s `onSuccess`. It fires even if the picked wallet was already connected.
+- **Connections are per session.** A new device, cleared site data or revoked site permission in the wallet means the user has to connect again.
+- **Account switching.** Privy follows the wallet's `accountsChanged` event: the new address replaces the old one in `useWallets()`. If the wallet is already connected, `connectWallet()` returns right away with the same address, so don't use it to "switch" accounts. The user switches in the wallet itself.
 - **Privy doesn't sign for external wallets.** It gives you the provider and switches chain. The approval UI is MetaMask's or Rabby's own. `useSendTransaction` and Privy's transaction screens only work for **embedded** wallets.
 - **Switch chain, then get the provider again.** `wallet.switchChain()` doesn't update provider instances you already have.
 - **Rabby** has no dedicated wallet-list entry (`rabby_wallet` is deprecated). It appears through `detected_ethereum_wallets` (EIP-6963).
-- **Several extensions connected:** "active" is the first non-embedded wallet in `useWallets()`.
-- **Linking is additive.** Linking a new address keeps the old ones. If you want one external wallet per user, unlink the old one after a successful link.
-- **One wallet, one Privy user.** Linking an address that already belongs to another Privy user fails.
-- **Links are per Privy app.** Dev and prod App IDs have separate user databases.
 
 ## Not covered (needed for production)
 
-- **Backend verification:** checking the Privy access token on your server and reading linked wallets from Privy's server API instead of trusting the client.
-- **Crediting deposits by linked address:** a link only proves control of the address at `latestVerifiedAt`. Decide whether links should need re-verifying.
+- **Backend verification:** checking the Privy access token on your server instead of trusting the client.
+- **Crediting deposits:** decide between destination-based and source-based crediting (see [Why connect, not link](#why-connect-not-link)).
 - **Sending from the embedded wallet**, gas sponsorship, and smart wallets.
