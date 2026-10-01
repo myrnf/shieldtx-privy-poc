@@ -33,6 +33,8 @@ npm run dev
 
 Open http://localhost:5173.
 
+The port is fixed at 5173 because Privy only accepts logins from allowed origins. If something else is using 5173, the dev server exits with an error rather than switching ports. Free the port and run it again.
+
 The external wallet (MetaMask / Rabby) needs USDC, plus a little ETH for gas, on the network you chose.
 
 ### Using your own Privy app
