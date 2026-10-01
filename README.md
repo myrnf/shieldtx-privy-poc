@@ -51,6 +51,7 @@ If you set up your own app in the [Privy dashboard](https://dashboard.privy.io),
 |---|---|
 | [`src/privy/privyConfig.ts`](src/privy/privyConfig.ts) | `PrivyProvider` config: login methods, embedded wallet creation, chains, wallet list |
 | [`src/privy/useDepositWallet.ts`](src/privy/useDepositWallet.ts) | **Core logic.** Works out the embedded wallet, the linked wallets and the active wallet, and returns an explicit `status` with the actions to move between statuses |
+| [`src/privy/useEnsureEmbeddedWallet.ts`](src/privy/useEnsureEmbeddedWallet.ts) | Fallback that creates the embedded wallet if Privy's step during login was interrupted |
 | [`src/chain/usdc.ts`](src/chain/usdc.ts) | Balance read, plus the transfer through a Privy `ConnectedWallet` (switch chain → EIP-1193 provider → viem `writeContract`) |
 | [`src/chain/config.ts`](src/chain/config.ts) | Chain and USDC addresses (native USDC, not USDC.e) |
 | `src/ui/*` | Demo UI only. Swap it for your own |
@@ -75,6 +76,7 @@ ready          ── user switches account ─────► needs-link
 
 ## Gotchas
 
+- **Embedded wallet creation can be interrupted.** `createOnLogin` only runs as the last step of the login modal, and Privy never retries it. If that step is interrupted (closed tab, network drop, or logging in as a second email while another window in the same browser profile is logged in as someone else), the user ends up logged in with no embedded wallet. `useEnsureEmbeddedWallet` creates the wallet when the user next loads the app.
 - **Linked ≠ connected.** *Linked* is saved on the Privy user on Privy's servers and is permanent until unlinked. *Connected* is a browser connection for this session, and it's what you need to sign. New device, cleared storage or revoked site permission means the user has to reconnect, not re-link.
 - **Account switching.** Privy follows the wallet's `accountsChanged` event. After a switch, the new address shows up in `useWallets()` with `linked: false`, and the old one drops out. Don't filter `useWallets()` down to linked addresses only: if you do, the switched account looks like "nothing connected", and `connectWallet()` becomes a silent no-op because the extension is already connected.
 - **Privy doesn't sign for external wallets.** It gives you the provider and switches chain. The approval UI is MetaMask's or Rabby's own. `useSendTransaction` and Privy's transaction screens only work for **embedded** wallets.

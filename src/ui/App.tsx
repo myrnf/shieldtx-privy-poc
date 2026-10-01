@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { usePrivy } from '@privy-io/react-auth'
 import { useDepositWallet } from '../privy/useDepositWallet'
+import { useEnsureEmbeddedWallet } from '../privy/useEnsureEmbeddedWallet'
 import { DepositModal } from './DepositModal'
 
 export function App() {
   const { ready, authenticated, user, login, logout } = usePrivy()
+  useEnsureEmbeddedWallet()
   const depositWallet = useDepositWallet()
   const { embedded, linkedExternal, active } = depositWallet
   const [depositOpen, setDepositOpen] = useState(false)
